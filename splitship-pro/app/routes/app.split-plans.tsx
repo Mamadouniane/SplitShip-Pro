@@ -1,7 +1,7 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Banner,
   BlockStack,
@@ -79,9 +79,67 @@ export default function SplitPlansPage() {
 
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [validationErrors, setValidationErrors] = useState<string[]>([]);
 
   const [recipients, setRecipients] = useState<Recipient[]>(initialRecipients);
   const [splitPlans, setSplitPlans] = useState<SplitPlan[]>(initialSplitPlans);
+
+  const parsedLineQuantity = Number(lineQuantity);
+  const parsedFirstQty = Number(firstRecipientQty);
+  const parsedSecondQty = Number(secondRecipientQty);
+
+  const clientValidation = useMemo(() => {
+    const errors: string[] = [];
+
+    if (!sourceLineGid.trim()) {
+      errors.push("Source line GID is required.");
+    }
+
+    if (!Number.isInteger(parsedLineQuantity) || parsedLineQuantity <= 0) {
+      errors.push("Line quantity must be a positive integer.");
+    }
+
+    if (!firstRecipientId) {
+      errors.push("First recipient is required.");
+    }
+
+    if (!Number.isInteger(parsedFirstQty) || parsedFirstQty <= 0) {
+      errors.push("First recipient quantity must be a positive integer.");
+    }
+
+    let allocationTotal = parsedFirstQty;
+
+    if (secondRecipientId) {
+      if (secondRecipientId === firstRecipientId) {
+        errors.push("Second recipient must be different from first recipient.");
+      }
+
+      if (!Number.isInteger(parsedSecondQty) || parsedSecondQty <= 0) {
+        errors.push("Second recipient quantity must be a positive integer.");
+      }
+
+      allocationTotal += parsedSecondQty;
+    }
+
+    if (Number.isFinite(parsedLineQuantity) && allocationTotal !== parsedLineQuantity) {
+      errors.push(
+        `Allocated quantity (${allocationTotal}) must equal line quantity (${parsedLineQuantity}).`,
+      );
+    }
+
+    return {
+      valid: errors.length === 0,
+      allocationTotal,
+      errors,
+    };
+  }, [
+    firstRecipientId,
+    parsedFirstQty,
+    parsedLineQuantity,
+    parsedSecondQty,
+    secondRecipientId,
+    sourceLineGid,
+  ]);
 
   async function refreshData() {
     const [recipientsRes, splitPlansRes] = await Promise.all([
@@ -103,6 +161,7 @@ export default function SplitPlansPage() {
   async function createRecipient() {
     setError(null);
     setNotice(null);
+    setValidationErrors([]);
 
     const response = await fetch("/app/api/recipients", {
       method: "POST",
@@ -134,11 +193,17 @@ export default function SplitPlansPage() {
   async function createSplitPlan() {
     setError(null);
     setNotice(null);
+    setValidationErrors([]);
+
+    if (!clientValidation.valid) {
+      setValidationErrors(clientValidation.errors);
+      return;
+    }
 
     const allocations = [
-      { recipientKey: firstRecipientId, quantity: Number(firstRecipientQty) },
+      { recipientKey: firstRecipientId, quantity: parsedFirstQty },
       ...(secondRecipientId
-        ? [{ recipientKey: secondRecipientId, quantity: Number(secondRecipientQty) }]
+        ? [{ recipientKey: secondRecipientId, quantity: parsedSecondQty }]
         : []),
     ];
 
@@ -147,7 +212,7 @@ export default function SplitPlansPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         sourceLineGid,
-        lineQuantity: Number(lineQuantity),
+        lineQuantity: parsedLineQuantity,
         allocations,
       }),
     });
@@ -155,7 +220,9 @@ export default function SplitPlansPage() {
     const data = await response.json();
 
     if (!response.ok) {
-      setError(data.error ?? data.validation?.errors?.join(" ") ?? "Failed to create split plan.");
+      const serverValidationErrors: string[] = data.validation?.errors ?? [];
+      if (serverValidationErrors.length) setValidationErrors(serverValidationErrors);
+      setError(data.error ?? "Failed to create split plan.");
       return;
     }
 
@@ -174,6 +241,15 @@ export default function SplitPlansPage() {
       <BlockStack gap="500">
         {notice ? <Banner tone="success">{notice}</Banner> : null}
         {error ? <Banner tone="critical">{error}</Banner> : null}
+        {validationErrors.length ? (
+          <Banner tone="warning" title="Validation issues">
+            <List>
+              {validationErrors.map((item) => (
+                <List.Item key={item}>{item}</List.Item>
+              ))}
+            </List>
+          </Banner>
+        ) : null}
 
         <Layout>
           <Layout.Section>
@@ -182,15 +258,42 @@ export default function SplitPlansPage() {
                 <Text as="h2" variant="headingMd">
                   1) Create recipient
                 </Text>
-                <TextField label="Name" value={recipientName} onChange={setRecipientName} autoComplete="name" />
-                <TextField label="Address line 1" value={recipientAddress} onChange={setRecipientAddress} autoComplete="address-line1" />
+                <TextField
+                  label="Name"
+                  value={recipientName}
+                  onChange={setRecipientName}
+                  autoComplete="name"
+                />
+                <TextField
+                  label="Address line 1"
+                  value={recipientAddress}
+                  onChange={setRecipientAddress}
+                  autoComplete="address-line1"
+                />
                 <InlineStack gap="200">
-                  <TextField label="City" value={recipientCity} onChange={setRecipientCity} autoComplete="address-level2" />
-                  <TextField label="Postal code" value={recipientPostalCode} onChange={setRecipientPostalCode} autoComplete="postal-code" />
-                  <TextField label="Country code" value={recipientCountryCode} onChange={setRecipientCountryCode} autoComplete="country" />
+                  <TextField
+                    label="City"
+                    value={recipientCity}
+                    onChange={setRecipientCity}
+                    autoComplete="address-level2"
+                  />
+                  <TextField
+                    label="Postal code"
+                    value={recipientPostalCode}
+                    onChange={setRecipientPostalCode}
+                    autoComplete="postal-code"
+                  />
+                  <TextField
+                    label="Country code"
+                    value={recipientCountryCode}
+                    onChange={setRecipientCountryCode}
+                    autoComplete="country"
+                  />
                 </InlineStack>
                 <InlineStack gap="200">
-                  <Button variant="primary" onClick={createRecipient}>Create recipient</Button>
+                  <Button variant="primary" onClick={createRecipient}>
+                    Create recipient
+                  </Button>
                   <Button onClick={refreshData}>Refresh data</Button>
                 </InlineStack>
               </BlockStack>
@@ -211,15 +314,52 @@ export default function SplitPlansPage() {
                   autoComplete="off"
                 />
                 <InlineStack gap="200">
-                  <TextField label="Line quantity" value={lineQuantity} onChange={setLineQuantity} autoComplete="off" />
-                  <TextField label="First recipient qty" value={firstRecipientQty} onChange={setFirstRecipientQty} autoComplete="off" />
-                  <TextField label="Second recipient qty" value={secondRecipientQty} onChange={setSecondRecipientQty} autoComplete="off" />
+                  <TextField
+                    label="Line quantity"
+                    value={lineQuantity}
+                    onChange={setLineQuantity}
+                    autoComplete="off"
+                  />
+                  <TextField
+                    label="First recipient qty"
+                    value={firstRecipientQty}
+                    onChange={setFirstRecipientQty}
+                    autoComplete="off"
+                  />
+                  <TextField
+                    label="Second recipient qty"
+                    value={secondRecipientQty}
+                    onChange={setSecondRecipientQty}
+                    autoComplete="off"
+                    disabled={!secondRecipientId}
+                  />
                 </InlineStack>
                 <InlineStack gap="200">
-                  <Select label="First recipient" options={recipientOptions} value={firstRecipientId} onChange={setFirstRecipientId} />
-                  <Select label="Second recipient (optional)" options={[{ label: "None", value: "" }, ...recipientOptions]} value={secondRecipientId} onChange={setSecondRecipientId} />
+                  <Select
+                    label="First recipient"
+                    options={recipientOptions}
+                    value={firstRecipientId}
+                    onChange={setFirstRecipientId}
+                  />
+                  <Select
+                    label="Second recipient (optional)"
+                    options={[{ label: "None", value: "" }, ...recipientOptions]}
+                    value={secondRecipientId}
+                    onChange={setSecondRecipientId}
+                  />
                 </InlineStack>
-                <Button variant="primary" onClick={createSplitPlan}>Create split plan</Button>
+
+                <Text as="p" variant="bodySm" tone="subdued">
+                  Allocation total: {clientValidation.allocationTotal} / {lineQuantity || "0"}
+                </Text>
+
+                <Button
+                  variant="primary"
+                  onClick={createSplitPlan}
+                  disabled={!clientValidation.valid}
+                >
+                  Create split plan
+                </Button>
               </BlockStack>
             </Card>
           </Layout.Section>
@@ -231,7 +371,9 @@ export default function SplitPlansPage() {
                   Latest split plans
                 </Text>
                 {splitPlans.length === 0 ? (
-                  <Text as="p" variant="bodyMd">No split plans yet.</Text>
+                  <Text as="p" variant="bodyMd">
+                    No split plans yet.
+                  </Text>
                 ) : (
                   <List>
                     {splitPlans.map((plan) => (
