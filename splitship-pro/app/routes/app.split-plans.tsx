@@ -31,7 +31,7 @@ type SplitPlan = {
   sourceLineGid: string;
   lineQuantity: number;
   status: string;
-  allocations: Array<{ recipient: { name: string }; quantity: number }>;
+  allocations: Array<{ recipient: { id: string; name: string }; quantity: number }>;
 };
 
 type AllocationRow = {
@@ -56,7 +56,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     take: 10,
     include: {
       allocations: {
-        include: { recipient: { select: { name: true } } },
+        include: { recipient: { select: { id: true, name: true } } },
       },
     },
   });
@@ -84,6 +84,7 @@ export default function SplitPlansPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
+  const [editingSplitPlanId, setEditingSplitPlanId] = useState<string | null>(null);
 
   const [recipients, setRecipients] = useState<Recipient[]>(initialRecipients);
   const [splitPlans, setSplitPlans] = useState<SplitPlan[]>(initialSplitPlans);
@@ -152,6 +153,32 @@ export default function SplitPlansPage() {
 
   function removeRecipientRow(key: string) {
     setAllocationRows((prev) => (prev.length <= 1 ? prev : prev.filter((row) => row.key !== key)));
+  }
+
+  function resetSplitPlanForm(defaultRecipientId?: string) {
+    setEditingSplitPlanId(null);
+    setSourceLineGid("");
+    setLineQuantity("2");
+    setAllocationRows([
+      { key: "row-1", recipientId: defaultRecipientId ?? recipients[0]?.id ?? "", quantity: "1" },
+      { key: "row-2", recipientId: "", quantity: "1" },
+    ]);
+  }
+
+  function startEditSplitPlan(plan: SplitPlan) {
+    setEditingSplitPlanId(plan.id);
+    setSourceLineGid(plan.sourceLineGid);
+    setLineQuantity(String(plan.lineQuantity));
+    setAllocationRows(
+      plan.allocations.map((allocation, index) => ({
+        key: `edit-${plan.id}-${index}`,
+        recipientId: allocation.recipient.id,
+        quantity: String(allocation.quantity),
+      })),
+    );
+    setValidationErrors([]);
+    setError(null);
+    setNotice(`Editing split plan ${plan.id}`);
   }
 
   async function refreshData() {
@@ -245,9 +272,10 @@ export default function SplitPlansPage() {
     }));
 
     const response = await fetch("/app/api/split-plans", {
-      method: "POST",
+      method: editingSplitPlanId ? "PUT" : "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        id: editingSplitPlanId ?? undefined,
         sourceLineGid,
         lineQuantity: parsedLineQuantity,
         allocations,
@@ -259,12 +287,17 @@ export default function SplitPlansPage() {
     if (!response.ok) {
       const serverValidationErrors: string[] = data.validation?.errors ?? [];
       if (serverValidationErrors.length) setValidationErrors(serverValidationErrors);
-      setError(data.error ?? "Failed to create split plan.");
+      setError(data.error ?? `Failed to ${editingSplitPlanId ? "update" : "create"} split plan.`);
       return;
     }
 
-    setNotice(`Split plan created: ${data.splitPlan.id}`);
+    setNotice(
+      editingSplitPlanId
+        ? `Split plan updated: ${data.splitPlan.id}`
+        : `Split plan created: ${data.splitPlan.id}`,
+    );
     await refreshData();
+    resetSplitPlanForm();
   }
 
   const recipientOptions = recipients.map((recipient) => ({
@@ -357,8 +390,13 @@ export default function SplitPlansPage() {
             <Card>
               <BlockStack gap="300">
                 <Text as="h2" variant="headingMd">
-                  2) Create split plan
+                  2) {editingSplitPlanId ? "Edit split plan" : "Create split plan"}
                 </Text>
+                {editingSplitPlanId ? (
+                  <Banner tone="info">
+                    Currently editing: {editingSplitPlanId}
+                  </Banner>
+                ) : null}
                 <TextField
                   label="Source line GID"
                   value={sourceLineGid}
@@ -402,9 +440,16 @@ export default function SplitPlansPage() {
                   Allocation total: {clientValidation.allocationTotal} / {lineQuantity || "0"}
                 </Text>
 
-                <Button variant="primary" onClick={createSplitPlan} disabled={!clientValidation.valid}>
-                  Create split plan
-                </Button>
+                <InlineStack gap="200">
+                  <Button variant="primary" onClick={createSplitPlan} disabled={!clientValidation.valid}>
+                    {editingSplitPlanId ? "Update split plan" : "Create split plan"}
+                  </Button>
+                  {editingSplitPlanId ? (
+                    <Button onClick={() => resetSplitPlanForm()}>
+                      Cancel edit
+                    </Button>
+                  ) : null}
+                </InlineStack>
               </BlockStack>
             </Card>
           </Layout.Section>
@@ -423,9 +468,14 @@ export default function SplitPlansPage() {
                   <List>
                     {splitPlans.map((plan) => (
                       <List.Item key={plan.id}>
-                        <Text as="span" variant="bodyMd">
-                          {plan.id} — qty {plan.lineQuantity} — {plan.status}
-                        </Text>
+                        <InlineStack align="space-between">
+                          <Text as="span" variant="bodyMd">
+                            {plan.id} — qty {plan.lineQuantity} — {plan.status}
+                          </Text>
+                          <Button variant="plain" onClick={() => startEditSplitPlan(plan)}>
+                            Edit
+                          </Button>
+                        </InlineStack>
                         <List>
                           {plan.allocations.map((allocation, idx) => (
                             <List.Item key={`${plan.id}-${idx}`}>
