@@ -32,3 +32,68 @@ model Session {
   refreshToken        String?
   refreshTokenExpires DateTime?
 }
+
+model Recipient {
+  id           String   @id @default(cuid())
+  shop         String
+  name         String
+  email        String?
+  phone        String?
+  addressLine1 String
+  addressLine2 String?
+  city         String
+  province     String?
+  postalCode   String
+  countryCode  String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  allocations SplitAllocation[]
+
+  @@index([shop])
+}
+
+model SplitPlan {
+  id             String   @id @default(cuid())
+  shop           String
+  orderId        String?
+  cartToken      String?
+  sourceLineGid  String
+  lineQuantity   Int
+  status         String   @default("draft")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  allocations SplitAllocation[]
+  events      SplitAuditEvent[]
+
+  @@index([shop, status])
+  @@index([orderId])
+  @@index([cartToken])
+}
+
+model SplitAllocation {
+  id          String   @id @default(cuid())
+  splitPlanId String
+  recipientId String
+  quantity    Int
+  createdAt   DateTime @default(now())
+
+  splitPlan  SplitPlan  @relation(fields: [splitPlanId], references: [id], onDelete: Cascade)
+  recipient  Recipient  @relation(fields: [recipientId], references: [id], onDelete: Restrict)
+
+  @@index([splitPlanId])
+  @@index([recipientId])
+}
+
+model SplitAuditEvent {
+  id          String   @id @default(cuid())
+  splitPlanId String
+  eventType   String
+  payloadJson String?
+  createdAt   DateTime @default(now())
+
+  splitPlan SplitPlan @relation(fields: [splitPlanId], references: [id], onDelete: Cascade)
+
+  @@index([splitPlanId, eventType])
+}
