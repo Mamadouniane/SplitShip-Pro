@@ -353,6 +353,33 @@ export default function SplitPlansPage() {
     await refreshData();
   }
 
+  async function updateSplitPlanStatus(
+    splitPlanId: string,
+    operation:
+      | "mark_ready_for_fulfillment"
+      | "mark_fulfilled_partial"
+      | "mark_fulfilled_complete",
+  ) {
+    setError(null);
+    setNotice(null);
+
+    const response = await fetch("/app/api/split-ops", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ splitPlanId, operation }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      setError(data.error ?? "Failed to update split plan status.");
+      return;
+    }
+
+    setNotice(`Split plan ${splitPlanId} updated.`);
+    await refreshData();
+  }
+
   const recipientOptions = recipients.map((recipient) => ({
     label: `${recipient.name} (${recipient.city}, ${recipient.countryCode})`,
     value: recipient.id,
@@ -382,6 +409,29 @@ export default function SplitPlansPage() {
   const allocationHeading = editingSplitPlanId ? "Edit split plan" : "Create split plan";
 
   const showNoPlans = filteredSplitPlans.length === 0;
+
+  function getLatestInstructionSummary(plan: SplitPlan) {
+    const latestEvent = plan.events?.[0];
+    if (
+      !latestEvent ||
+      latestEvent.eventType !== "split_plan.fulfillment_instructions_generated" ||
+      !latestEvent.payloadJson
+    ) {
+      return null;
+    }
+
+    try {
+      const parsed = JSON.parse(latestEvent.payloadJson) as {
+        instructions?: Array<{ recipientName?: string; quantity?: number }>;
+      };
+      const count = parsed.instructions?.length ?? 0;
+      const qtyTotal =
+        parsed.instructions?.reduce((sum, item) => sum + (item.quantity ?? 0), 0) ?? 0;
+      return `Instructions: ${count} recipient(s), ${qtyTotal} total qty`;
+    } catch {
+      return "Instructions generated";
+    }
+  }
 
   return (
     <Page>
@@ -580,6 +630,30 @@ export default function SplitPlansPage() {
                             </Button>
                             <Button
                               variant="plain"
+                              onClick={() =>
+                                updateSplitPlanStatus(plan.id, "mark_ready_for_fulfillment")
+                              }
+                            >
+                              Mark ready
+                            </Button>
+                            <Button
+                              variant="plain"
+                              onClick={() =>
+                                updateSplitPlanStatus(plan.id, "mark_fulfilled_partial")
+                              }
+                            >
+                              Mark partial
+                            </Button>
+                            <Button
+                              variant="plain"
+                              onClick={() =>
+                                updateSplitPlanStatus(plan.id, "mark_fulfilled_complete")
+                              }
+                            >
+                              Mark complete
+                            </Button>
+                            <Button
+                              variant="plain"
                               tone="critical"
                               onClick={() => deleteSplitPlan(plan.id)}
                             >
@@ -593,11 +667,11 @@ export default function SplitPlansPage() {
                               Qty {allocation.quantity} — {allocation.recipient.name}
                             </List.Item>
                           ))}
-                          {plan.events?.[0]?.eventType ===
-                          "split_plan.fulfillment_instructions_generated" ? (
-                            <List.Item>
-                              Fulfillment instructions generated
-                            </List.Item>
+                          {getLatestInstructionSummary(plan) ? (
+                            <List.Item>{getLatestInstructionSummary(plan)}</List.Item>
+                          ) : null}
+                          {plan.events?.[0]?.eventType ? (
+                            <List.Item>Latest event: {plan.events[0].eventType}</List.Item>
                           ) : null}
                         </List>
                       </List.Item>

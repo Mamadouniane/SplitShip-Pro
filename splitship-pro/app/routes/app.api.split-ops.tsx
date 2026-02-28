@@ -4,9 +4,21 @@ import db from "../db.server";
 import { buildFulfillmentInstructions } from "../models/split-plan.server";
 import { authenticate } from "../shopify.server";
 
+type Operation =
+  | "generate_fulfillment_instructions"
+  | "mark_ready_for_fulfillment"
+  | "mark_fulfilled_partial"
+  | "mark_fulfilled_complete";
+
 type Payload = {
   splitPlanId?: string;
-  operation?: "generate_fulfillment_instructions";
+  operation?: Operation;
+};
+
+const OP_STATUS_MAP: Record<Exclude<Operation, "generate_fulfillment_instructions">, string> = {
+  mark_ready_for_fulfillment: "ready_for_fulfillment",
+  mark_fulfilled_partial: "fulfilled_partial",
+  mark_fulfilled_complete: "fulfilled_complete",
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -17,8 +29,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return json({ error: "splitPlanId is required." }, { status: 400 });
   }
 
-  if (payload.operation !== "generate_fulfillment_instructions") {
-    return json({ error: "Unsupported operation." }, { status: 400 });
+  if (!payload.operation) {
+    return json({ error: "operation is required." }, { status: 400 });
   }
 
   const splitPlan = await db.splitPlan.findFirst({
@@ -36,20 +48,52 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return json({ error: "Split plan not found." }, { status: 404 });
   }
 
-  if (!splitPlan.allocations.length) {
-    return json({ error: "Split plan has no allocations." }, { status: 400 });
+  if (payload.operation === "generate_fulfillment_instructions") {
+    if (!splitPlan.allocations.length) {
+      return json({ error: "Split plan has no allocations." }, { status: 400 });
+    }
+
+    const instructions = buildFulfillmentInstructions(splitPlan.allocations);
+
+    const updated = await db.splitPlan.update({
+      where: { id: splitPlan.id },
+      data: {
+        status: "ready_for_fulfillment",
+        events: {
+          create: {
+            eventType: "split_plan.fulfillment_instructions_generated",
+            payloadJson: JSON.stringify({ instructions }),
+          },
+        },
+      },
+      include: {
+        events: {
+          orderBy: { createdAt: "desc" },
+          take: 1,
+        },
+      },
+    });
+
+    return json({ splitPlan: updated, instructions });
   }
 
-  const instructions = buildFulfillmentInstructions(splitPlan.allocations);
+  if (!(payload.operation in OP_STATUS_MAP)) {
+    return json({ error: "Unsupported operation." }, { status: 400 });
+  }
+
+  const nextStatus = OP_STATUS_MAP[payload.operation as keyof typeof OP_STATUS_MAP];
 
   const updated = await db.splitPlan.update({
     where: { id: splitPlan.id },
     data: {
-      status: "ready_for_fulfillment",
+      status: nextStatus,
       events: {
         create: {
-          eventType: "split_plan.fulfillment_instructions_generated",
-          payloadJson: JSON.stringify({ instructions }),
+          eventType: `split_plan.${nextStatus}`,
+          payloadJson: JSON.stringify({
+            previousStatus: splitPlan.status,
+            nextStatus,
+          }),
         },
       },
     },
@@ -61,5 +105,5 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     },
   });
 
-  return json({ splitPlan: updated, instructions });
+  return json({ splitPlan: updated });
 };
