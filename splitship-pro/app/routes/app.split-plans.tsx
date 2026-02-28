@@ -34,6 +34,12 @@ type SplitPlan = {
   allocations: Array<{ recipient: { name: string }; quantity: number }>;
 };
 
+type AllocationRow = {
+  key: string;
+  recipientId: string;
+  quantity: string;
+};
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
 
@@ -70,12 +76,10 @@ export default function SplitPlansPage() {
 
   const [sourceLineGid, setSourceLineGid] = useState("");
   const [lineQuantity, setLineQuantity] = useState("2");
-  const [firstRecipientId, setFirstRecipientId] = useState(
-    initialRecipients[0]?.id ?? "",
-  );
-  const [firstRecipientQty, setFirstRecipientQty] = useState("1");
-  const [secondRecipientId, setSecondRecipientId] = useState("");
-  const [secondRecipientQty, setSecondRecipientQty] = useState("1");
+  const [allocationRows, setAllocationRows] = useState<AllocationRow[]>([
+    { key: "row-1", recipientId: initialRecipients[0]?.id ?? "", quantity: "1" },
+    { key: "row-2", recipientId: "", quantity: "1" },
+  ]);
 
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -85,8 +89,6 @@ export default function SplitPlansPage() {
   const [splitPlans, setSplitPlans] = useState<SplitPlan[]>(initialSplitPlans);
 
   const parsedLineQuantity = Number(lineQuantity);
-  const parsedFirstQty = Number(firstRecipientQty);
-  const parsedSecondQty = Number(secondRecipientQty);
 
   const clientValidation = useMemo(() => {
     const errors: string[] = [];
@@ -99,26 +101,27 @@ export default function SplitPlansPage() {
       errors.push("Line quantity must be a positive integer.");
     }
 
-    if (!firstRecipientId) {
-      errors.push("First recipient is required.");
+    const activeRows = allocationRows.filter((row) => row.recipientId);
+
+    if (!activeRows.length) {
+      errors.push("At least one recipient allocation is required.");
     }
 
-    if (!Number.isInteger(parsedFirstQty) || parsedFirstQty <= 0) {
-      errors.push("First recipient quantity must be a positive integer.");
-    }
+    const seen = new Set<string>();
+    let allocationTotal = 0;
 
-    let allocationTotal = parsedFirstQty;
-
-    if (secondRecipientId) {
-      if (secondRecipientId === firstRecipientId) {
-        errors.push("Second recipient must be different from first recipient.");
+    for (const row of activeRows) {
+      if (seen.has(row.recipientId)) {
+        errors.push("Recipients cannot be duplicated.");
       }
+      seen.add(row.recipientId);
 
-      if (!Number.isInteger(parsedSecondQty) || parsedSecondQty <= 0) {
-        errors.push("Second recipient quantity must be a positive integer.");
+      const qty = Number(row.quantity);
+      if (!Number.isInteger(qty) || qty <= 0) {
+        errors.push("Each recipient quantity must be a positive integer.");
+      } else {
+        allocationTotal += qty;
       }
-
-      allocationTotal += parsedSecondQty;
     }
 
     if (Number.isFinite(parsedLineQuantity) && allocationTotal !== parsedLineQuantity) {
@@ -131,15 +134,25 @@ export default function SplitPlansPage() {
       valid: errors.length === 0,
       allocationTotal,
       errors,
+      activeRows,
     };
-  }, [
-    firstRecipientId,
-    parsedFirstQty,
-    parsedLineQuantity,
-    parsedSecondQty,
-    secondRecipientId,
-    sourceLineGid,
-  ]);
+  }, [allocationRows, parsedLineQuantity, sourceLineGid]);
+
+  function updateRow(key: string, patch: Partial<AllocationRow>) {
+    setAllocationRows((prev) => prev.map((row) => (row.key === key ? { ...row, ...patch } : row)));
+  }
+
+  function addRecipientRow() {
+    const nextIndex = allocationRows.length + 1;
+    setAllocationRows((prev) => [
+      ...prev,
+      { key: `row-${Date.now()}-${nextIndex}`, recipientId: "", quantity: "1" },
+    ]);
+  }
+
+  function removeRecipientRow(key: string) {
+    setAllocationRows((prev) => (prev.length <= 1 ? prev : prev.filter((row) => row.key !== key)));
+  }
 
   async function refreshData() {
     const [recipientsRes, splitPlansRes] = await Promise.all([
@@ -150,11 +163,15 @@ export default function SplitPlansPage() {
     const recipientsJson = await recipientsRes.json();
     const splitPlansJson = await splitPlansRes.json();
 
-    setRecipients(recipientsJson.recipients ?? []);
+    const nextRecipients = recipientsJson.recipients ?? [];
+    setRecipients(nextRecipients);
     setSplitPlans(splitPlansJson.splitPlans ?? []);
 
-    if (!firstRecipientId && recipientsJson.recipients?.length) {
-      setFirstRecipientId(recipientsJson.recipients[0].id);
+    if (nextRecipients.length) {
+      setAllocationRows((prev) => {
+        if (prev.some((row) => row.recipientId)) return prev;
+        return [{ ...prev[0], recipientId: nextRecipients[0].id }, ...prev.slice(1)];
+      });
     }
   }
 
@@ -222,12 +239,10 @@ export default function SplitPlansPage() {
       return;
     }
 
-    const allocations = [
-      { recipientKey: firstRecipientId, quantity: parsedFirstQty },
-      ...(secondRecipientId
-        ? [{ recipientKey: secondRecipientId, quantity: parsedSecondQty }]
-        : []),
-    ];
+    const allocations = clientValidation.activeRows.map((row) => ({
+      recipientKey: row.recipientId,
+      quantity: Number(row.quantity),
+    }));
 
     const response = await fetch("/app/api/split-plans", {
       method: "POST",
@@ -280,12 +295,7 @@ export default function SplitPlansPage() {
                 <Text as="h2" variant="headingMd">
                   1) Create recipient
                 </Text>
-                <TextField
-                  label="Name"
-                  value={recipientName}
-                  onChange={setRecipientName}
-                  autoComplete="name"
-                />
+                <TextField label="Name" value={recipientName} onChange={setRecipientName} autoComplete="name" />
                 <TextField
                   label="Address line 1"
                   value={recipientAddress}
@@ -293,12 +303,7 @@ export default function SplitPlansPage() {
                   autoComplete="address-line1"
                 />
                 <InlineStack gap="200">
-                  <TextField
-                    label="City"
-                    value={recipientCity}
-                    onChange={setRecipientCity}
-                    autoComplete="address-level2"
-                  />
+                  <TextField label="City" value={recipientCity} onChange={setRecipientCity} autoComplete="address-level2" />
                   <TextField
                     label="Postal code"
                     value={recipientPostalCode}
@@ -335,11 +340,7 @@ export default function SplitPlansPage() {
                             <Text as="span" variant="bodySm">
                               {recipient.name} ({recipient.city}, {recipient.countryCode})
                             </Text>
-                            <Button
-                              variant="plain"
-                              tone="critical"
-                              onClick={() => deleteRecipient(recipient.id)}
-                            >
+                            <Button variant="plain" tone="critical" onClick={() => deleteRecipient(recipient.id)}>
                               Delete
                             </Button>
                           </InlineStack>
@@ -365,53 +366,43 @@ export default function SplitPlansPage() {
                   helpText="Example: gid://shopify/LineItem/123"
                   autoComplete="off"
                 />
-                <TextField
-                  label="Line quantity"
-                  value={lineQuantity}
-                  onChange={setLineQuantity}
-                  autoComplete="off"
-                />
+                <TextField label="Line quantity" value={lineQuantity} onChange={setLineQuantity} autoComplete="off" />
 
-                <InlineStack gap="200" align="start">
-                  <Select
-                    label="Recipient 1"
-                    options={recipientOptions}
-                    value={firstRecipientId}
-                    onChange={setFirstRecipientId}
-                  />
-                  <TextField
-                    label="Qty"
-                    value={firstRecipientQty}
-                    onChange={setFirstRecipientQty}
-                    autoComplete="off"
-                  />
-                </InlineStack>
+                {allocationRows.map((row, index) => (
+                  <InlineStack key={row.key} gap="200" align="start">
+                    <Select
+                      label={`Recipient ${index + 1}`}
+                      options={[{ label: "Select recipient", value: "" }, ...recipientOptions]}
+                      value={row.recipientId}
+                      onChange={(value) => updateRow(row.key, { recipientId: value })}
+                    />
+                    <TextField
+                      label="Qty"
+                      value={row.quantity}
+                      onChange={(value) => updateRow(row.key, { quantity: value })}
+                      autoComplete="off"
+                      disabled={!row.recipientId}
+                    />
+                    <Button
+                      tone="critical"
+                      variant="plain"
+                      onClick={() => removeRecipientRow(row.key)}
+                      disabled={allocationRows.length <= 1}
+                    >
+                      Remove
+                    </Button>
+                  </InlineStack>
+                ))}
 
-                <InlineStack gap="200" align="start">
-                  <Select
-                    label="Recipient 2 (optional)"
-                    options={[{ label: "None", value: "" }, ...recipientOptions]}
-                    value={secondRecipientId}
-                    onChange={setSecondRecipientId}
-                  />
-                  <TextField
-                    label="Qty"
-                    value={secondRecipientQty}
-                    onChange={setSecondRecipientQty}
-                    autoComplete="off"
-                    disabled={!secondRecipientId}
-                  />
+                <InlineStack gap="200">
+                  <Button onClick={addRecipientRow}>Add recipient row</Button>
                 </InlineStack>
 
                 <Text as="p" variant="bodySm" tone="subdued">
                   Allocation total: {clientValidation.allocationTotal} / {lineQuantity || "0"}
                 </Text>
 
-                <Button
-                  variant="primary"
-                  onClick={createSplitPlan}
-                  disabled={!clientValidation.valid}
-                >
+                <Button variant="primary" onClick={createSplitPlan} disabled={!clientValidation.valid}>
                   Create split plan
                 </Button>
               </BlockStack>
