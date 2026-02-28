@@ -365,39 +365,41 @@ export default function SplitPlansPage() {
                   helpText="Example: gid://shopify/LineItem/123"
                   autoComplete="off"
                 />
-                <InlineStack gap="200">
-                  <TextField
-                    label="Line quantity"
-                    value={lineQuantity}
-                    onChange={setLineQuantity}
-                    autoComplete="off"
-                  />
-                  <TextField
-                    label="First recipient qty"
-                    value={firstRecipientQty}
-                    onChange={setFirstRecipientQty}
-                    autoComplete="off"
-                  />
-                  <TextField
-                    label="Second recipient qty"
-                    value={secondRecipientQty}
-                    onChange={setSecondRecipientQty}
-                    autoComplete="off"
-                    disabled={!secondRecipientId}
-                  />
-                </InlineStack>
-                <InlineStack gap="200">
+                <TextField
+                  label="Line quantity"
+                  value={lineQuantity}
+                  onChange={setLineQuantity}
+                  autoComplete="off"
+                />
+
+                <InlineStack gap="200" align="start">
                   <Select
-                    label="First recipient"
+                    label="Recipient 1"
                     options={recipientOptions}
                     value={firstRecipientId}
                     onChange={setFirstRecipientId}
                   />
+                  <TextField
+                    label="Qty"
+                    value={firstRecipientQty}
+                    onChange={setFirstRecipientQty}
+                    autoComplete="off"
+                  />
+                </InlineStack>
+
+                <InlineStack gap="200" align="start">
                   <Select
-                    label="Second recipient (optional)"
+                    label="Recipient 2 (optional)"
                     options={[{ label: "None", value: "" }, ...recipientOptions]}
                     value={secondRecipientId}
                     onChange={setSecondRecipientId}
+                  />
+                  <TextField
+                    label="Qty"
+                    value={secondRecipientQty}
+                    onChange={setSecondRecipientQty}
+                    autoComplete="off"
+                    disabled={!secondRecipientId}
                   />
                 </InlineStack>
 
@@ -436,7 +438,7 @@ export default function SplitPlansPage() {
                         <List>
                           {plan.allocations.map((allocation, idx) => (
                             <List.Item key={`${plan.id}-${idx}`}>
-                              {allocation.recipient.name}: {allocation.quantity}
+                              Qty {allocation.quantity} — {allocation.recipient.name}
                             </List.Item>
                           ))}
                         </List>
