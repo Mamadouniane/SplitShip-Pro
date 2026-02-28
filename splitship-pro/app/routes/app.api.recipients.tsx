@@ -1,5 +1,6 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
+import { Prisma } from "@prisma/client";
 import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
 
@@ -109,8 +110,25 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     if (!existing) return json({ error: "Recipient not found." }, { status: 404 });
 
-    await prisma.recipient.delete({ where: { id: payload.id } });
-    return json({ deleted: true });
+    try {
+      await prisma.recipient.delete({ where: { id: payload.id } });
+      return json({ deleted: true });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2003"
+      ) {
+        return json(
+          {
+            error:
+              "Recipient is used in split plans and cannot be deleted yet.",
+          },
+          { status: 409 },
+        );
+      }
+
+      throw error;
+    }
   }
 
   return json({ error: `Method ${method} not supported.` }, { status: 405 });

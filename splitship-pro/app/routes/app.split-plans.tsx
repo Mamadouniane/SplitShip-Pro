@@ -190,6 +190,28 @@ export default function SplitPlansPage() {
     await refreshData();
   }
 
+  async function deleteRecipient(recipientId: string) {
+    setError(null);
+    setNotice(null);
+    setValidationErrors([]);
+
+    const response = await fetch("/app/api/recipients", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: recipientId }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      setError(data.error ?? "Failed to delete recipient.");
+      return;
+    }
+
+    setNotice("Recipient deleted.");
+    await refreshData();
+  }
+
   async function createSplitPlan() {
     setError(null);
     setNotice(null);
@@ -296,6 +318,36 @@ export default function SplitPlansPage() {
                   </Button>
                   <Button onClick={refreshData}>Refresh data</Button>
                 </InlineStack>
+
+                <BlockStack gap="200">
+                  <Text as="h3" variant="headingSm">
+                    Recipient book
+                  </Text>
+                  {recipients.length === 0 ? (
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      No recipients yet.
+                    </Text>
+                  ) : (
+                    <List>
+                      {recipients.map((recipient) => (
+                        <List.Item key={recipient.id}>
+                          <InlineStack align="space-between">
+                            <Text as="span" variant="bodySm">
+                              {recipient.name} ({recipient.city}, {recipient.countryCode})
+                            </Text>
+                            <Button
+                              variant="plain"
+                              tone="critical"
+                              onClick={() => deleteRecipient(recipient.id)}
+                            >
+                              Delete
+                            </Button>
+                          </InlineStack>
+                        </List.Item>
+                      ))}
+                    </List>
+                  )}
+                </BlockStack>
               </BlockStack>
             </Card>
           </Layout.Section>
