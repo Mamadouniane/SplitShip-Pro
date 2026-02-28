@@ -176,5 +176,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return json({ splitPlan });
   }
 
+  if (method === "DELETE") {
+    if (!payload.id) return json({ error: "Split plan id is required." }, { status: 400 });
+
+    const existing = await prisma.splitPlan.findFirst({
+      where: { id: payload.id, shop: session.shop },
+      select: { id: true },
+    });
+
+    if (!existing) return json({ error: "Split plan not found." }, { status: 404 });
+
+    await prisma.splitPlan.delete({ where: { id: payload.id } });
+    return json({ deleted: true });
+  }
+
   return json({ error: `Method ${method} not supported.` }, { status: 405 });
 };

@@ -3,6 +3,20 @@ export type RecipientInput = {
   quantity: number;
 };
 
+export type FulfillmentInstruction = {
+  recipientId: string;
+  recipientName: string;
+  quantity: number;
+  address: {
+    line1: string;
+    line2?: string | null;
+    city: string;
+    province?: string | null;
+    postalCode: string;
+    countryCode: string;
+  };
+};
+
 export type AllocationValidationResult = {
   valid: boolean;
   expectedQuantity: number;
@@ -52,4 +66,34 @@ export function validateRecipientAllocations(
     allocatedQuantity,
     errors,
   };
+}
+
+export function buildFulfillmentInstructions(
+  allocations: Array<{
+    quantity: number;
+    recipient: {
+      id: string;
+      name: string;
+      addressLine1: string;
+      addressLine2?: string | null;
+      city: string;
+      province?: string | null;
+      postalCode: string;
+      countryCode: string;
+    };
+  }>,
+): FulfillmentInstruction[] {
+  return allocations.map((allocation) => ({
+    recipientId: allocation.recipient.id,
+    recipientName: allocation.recipient.name,
+    quantity: allocation.quantity,
+    address: {
+      line1: allocation.recipient.addressLine1,
+      line2: allocation.recipient.addressLine2,
+      city: allocation.recipient.city,
+      province: allocation.recipient.province,
+      postalCode: allocation.recipient.postalCode,
+      countryCode: allocation.recipient.countryCode,
+    },
+  }));
 }

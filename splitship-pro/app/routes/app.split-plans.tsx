@@ -32,6 +32,7 @@ type SplitPlan = {
   lineQuantity: number;
   status: string;
   allocations: Array<{ recipient: { id: string; name: string }; quantity: number }>;
+  events?: Array<{ eventType: string; payloadJson?: string | null }>;
 };
 
 type AllocationRow = {
@@ -57,6 +58,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     include: {
       allocations: {
         include: { recipient: { select: { id: true, name: true } } },
+      },
+      events: {
+        orderBy: { createdAt: "desc" },
+        take: 1,
       },
     },
   });
@@ -85,6 +90,8 @@ export default function SplitPlansPage() {
   const [error, setError] = useState<string | null>(null);
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [editingSplitPlanId, setEditingSplitPlanId] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [planSearch, setPlanSearch] = useState("");
 
   const [recipients, setRecipients] = useState<Recipient[]>(initialRecipients);
   const [splitPlans, setSplitPlans] = useState<SplitPlan[]>(initialSplitPlans);
@@ -300,10 +307,81 @@ export default function SplitPlansPage() {
     resetSplitPlanForm();
   }
 
+  async function deleteSplitPlan(splitPlanId: string) {
+    setError(null);
+    setNotice(null);
+
+    const response = await fetch("/app/api/split-plans", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: splitPlanId }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      setError(data.error ?? "Failed to delete split plan.");
+      return;
+    }
+
+    setNotice("Split plan deleted.");
+    if (editingSplitPlanId === splitPlanId) resetSplitPlanForm();
+    await refreshData();
+  }
+
+  async function generateFulfillmentInstructions(splitPlanId: string) {
+    setError(null);
+    setNotice(null);
+
+    const response = await fetch("/app/api/split-ops", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        splitPlanId,
+        operation: "generate_fulfillment_instructions",
+      }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      setError(data.error ?? "Failed to generate fulfillment instructions.");
+      return;
+    }
+
+    setNotice(`Fulfillment instructions generated for ${splitPlanId}.`);
+    await refreshData();
+  }
+
   const recipientOptions = recipients.map((recipient) => ({
     label: `${recipient.name} (${recipient.city}, ${recipient.countryCode})`,
     value: recipient.id,
   }));
+
+  const filteredSplitPlans = splitPlans.filter((plan) => {
+    const statusMatch = statusFilter === "all" || plan.status === statusFilter;
+    const search = planSearch.trim().toLowerCase();
+    const searchMatch =
+      !search ||
+      plan.id.toLowerCase().includes(search) ||
+      plan.sourceLineGid.toLowerCase().includes(search);
+    return statusMatch && searchMatch;
+  });
+
+  const knownStatuses = Array.from(new Set(splitPlans.map((plan) => plan.status)));
+
+  const statusOptions = [
+    { label: "All statuses", value: "all" },
+    ...knownStatuses.map((status) => ({ label: status, value: status })),
+  ];
+
+  const recipientCount = recipients.length;
+
+  const canAddRow = allocationRows.length < Math.max(1, recipientCount);
+
+  const allocationHeading = editingSplitPlanId ? "Edit split plan" : "Create split plan";
+
+  const showNoPlans = filteredSplitPlans.length === 0;
 
   return (
     <Page>
@@ -390,7 +468,7 @@ export default function SplitPlansPage() {
             <Card>
               <BlockStack gap="300">
                 <Text as="h2" variant="headingMd">
-                  2) {editingSplitPlanId ? "Edit split plan" : "Create split plan"}
+                  2) {allocationHeading}
                 </Text>
                 {editingSplitPlanId ? (
                   <Banner tone="info">
@@ -433,7 +511,9 @@ export default function SplitPlansPage() {
                 ))}
 
                 <InlineStack gap="200">
-                  <Button onClick={addRecipientRow}>Add recipient row</Button>
+                  <Button onClick={addRecipientRow} disabled={!canAddRow}>
+                    Add recipient row
+                  </Button>
                 </InlineStack>
 
                 <Text as="p" variant="bodySm" tone="subdued">
@@ -460,21 +540,52 @@ export default function SplitPlansPage() {
                 <Text as="h2" variant="headingMd">
                   Latest split plans
                 </Text>
-                {splitPlans.length === 0 ? (
+                <InlineStack gap="200">
+                  <Select
+                    label="Status"
+                    options={statusOptions}
+                    value={statusFilter}
+                    onChange={setStatusFilter}
+                  />
+                  <TextField
+                    label="Search"
+                    value={planSearch}
+                    onChange={setPlanSearch}
+                    autoComplete="off"
+                    placeholder="Plan id or line GID"
+                  />
+                </InlineStack>
+
+                {showNoPlans ? (
                   <Text as="p" variant="bodyMd">
-                    No split plans yet.
+                    No split plans found for the current filter.
                   </Text>
                 ) : (
                   <List>
-                    {splitPlans.map((plan) => (
+                    {filteredSplitPlans.map((plan) => (
                       <List.Item key={plan.id}>
-                        <InlineStack align="space-between">
+                        <InlineStack align="space-between" gap="200">
                           <Text as="span" variant="bodyMd">
                             {plan.id} — qty {plan.lineQuantity} — {plan.status}
                           </Text>
-                          <Button variant="plain" onClick={() => startEditSplitPlan(plan)}>
-                            Edit
-                          </Button>
+                          <InlineStack gap="200">
+                            <Button variant="plain" onClick={() => startEditSplitPlan(plan)}>
+                              Edit
+                            </Button>
+                            <Button
+                              variant="plain"
+                              onClick={() => generateFulfillmentInstructions(plan.id)}
+                            >
+                              Generate instructions
+                            </Button>
+                            <Button
+                              variant="plain"
+                              tone="critical"
+                              onClick={() => deleteSplitPlan(plan.id)}
+                            >
+                              Delete
+                            </Button>
+                          </InlineStack>
                         </InlineStack>
                         <List>
                           {plan.allocations.map((allocation, idx) => (
@@ -482,6 +593,12 @@ export default function SplitPlansPage() {
                               Qty {allocation.quantity} — {allocation.recipient.name}
                             </List.Item>
                           ))}
+                          {plan.events?.[0]?.eventType ===
+                          "split_plan.fulfillment_instructions_generated" ? (
+                            <List.Item>
+                              Fulfillment instructions generated
+                            </List.Item>
+                          ) : null}
                         </List>
                       </List.Item>
                     ))}
