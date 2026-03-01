@@ -17,6 +17,18 @@ export type FulfillmentInstruction = {
   };
 };
 
+export type SplitPayloadContract = {
+  schemaVersion: "2026-03-3pl-v1";
+  idempotencyKey: string;
+  splitPlanId: string;
+  shop: string;
+  orderId?: string | null;
+  cartToken?: string | null;
+  sourceLineGid: string;
+  lineQuantity: number;
+  recipients: FulfillmentInstruction[];
+};
+
 export type AllocationValidationResult = {
   valid: boolean;
   expectedQuantity: number;
@@ -96,4 +108,27 @@ export function buildFulfillmentInstructions(
       countryCode: allocation.recipient.countryCode,
     },
   }));
+}
+
+export function buildSplitPayloadContract(input: {
+  idempotencyKey: string;
+  splitPlanId: string;
+  shop: string;
+  orderId?: string | null;
+  cartToken?: string | null;
+  sourceLineGid: string;
+  lineQuantity: number;
+  recipients: FulfillmentInstruction[];
+}): SplitPayloadContract {
+  return {
+    schemaVersion: "2026-03-3pl-v1",
+    idempotencyKey: input.idempotencyKey,
+    splitPlanId: input.splitPlanId,
+    shop: input.shop,
+    orderId: input.orderId,
+    cartToken: input.cartToken,
+    sourceLineGid: input.sourceLineGid,
+    lineQuantity: input.lineQuantity,
+    recipients: input.recipients,
+  };
 }

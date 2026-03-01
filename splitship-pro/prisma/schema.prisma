@@ -54,20 +54,26 @@ model Recipient {
 }
 
 model SplitPlan {
-  id             String   @id @default(cuid())
-  shop           String
-  orderId        String?
-  cartToken      String?
-  sourceLineGid  String
-  lineQuantity   Int
-  status         String   @default("draft")
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id                  String   @id @default(cuid())
+  shop                String
+  orderId             String?
+  cartToken           String?
+  sourceLineGid       String
+  lineQuantity        Int
+  status              String   @default("draft")
+  deliveryStatus      String   @default("pending")
+  deliveryAttempts    Int      @default(0)
+  lastDeliveryError   String?
+  lastDeliveryAt      DateTime?
+  idempotencyKey      String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 
   allocations SplitAllocation[]
   events      SplitAuditEvent[]
 
   @@index([shop, status])
+  @@index([shop, deliveryStatus])
   @@index([orderId])
   @@index([cartToken])
 }

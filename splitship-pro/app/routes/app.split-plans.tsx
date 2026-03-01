@@ -31,6 +31,10 @@ type SplitPlan = {
   sourceLineGid: string;
   lineQuantity: number;
   status: string;
+  deliveryStatus?: string;
+  deliveryAttempts?: number;
+  lastDeliveryError?: string | null;
+  lastDeliveryAt?: string | null;
   allocations: Array<{ recipient: { id: string; name: string }; quantity: number }>;
   events?: Array<{ eventType: string; payloadJson?: string | null }>;
 };
@@ -329,30 +333,6 @@ export default function SplitPlansPage() {
     await refreshData();
   }
 
-  async function generateFulfillmentInstructions(splitPlanId: string) {
-    setError(null);
-    setNotice(null);
-
-    const response = await fetch("/app/api/split-ops", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        splitPlanId,
-        operation: "generate_fulfillment_instructions",
-      }),
-    });
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      setError(data.error ?? "Failed to generate fulfillment instructions.");
-      return;
-    }
-
-    setNotice(`Fulfillment instructions generated for ${splitPlanId}.`);
-    await refreshData();
-  }
-
   async function updateSplitPlanStatus(
     splitPlanId: string,
     operation:
@@ -377,6 +357,30 @@ export default function SplitPlansPage() {
     }
 
     setNotice(`Split plan ${splitPlanId} updated.`);
+    await refreshData();
+  }
+
+  async function sendTo3pl(
+    splitPlanId: string,
+    operation: "send_to_3pl" | "retry_3pl" | "ack_3pl",
+  ) {
+    setError(null);
+    setNotice(null);
+
+    const response = await fetch("/app/api/split-ops", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ splitPlanId, operation }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      setError(data.error ?? "3PL handoff operation failed.");
+      return;
+    }
+
+    setNotice(`3PL operation '${operation}' completed for ${splitPlanId}.`);
     await refreshData();
   }
 
@@ -616,7 +620,7 @@ export default function SplitPlansPage() {
                       <List.Item key={plan.id}>
                         <InlineStack align="space-between" gap="200">
                           <Text as="span" variant="bodyMd">
-                            {plan.id} — qty {plan.lineQuantity} — {plan.status}
+                            {plan.id} — qty {plan.lineQuantity} — status {plan.status} — delivery {plan.deliveryStatus ?? "pending"}
                           </Text>
                           <InlineStack gap="200">
                             <Button variant="plain" onClick={() => startEditSplitPlan(plan)}>
@@ -624,9 +628,21 @@ export default function SplitPlansPage() {
                             </Button>
                             <Button
                               variant="plain"
-                              onClick={() => generateFulfillmentInstructions(plan.id)}
+                              onClick={() => sendTo3pl(plan.id, "send_to_3pl")}
                             >
-                              Generate instructions
+                              Send to 3PL
+                            </Button>
+                            <Button
+                              variant="plain"
+                              onClick={() => sendTo3pl(plan.id, "retry_3pl")}
+                            >
+                              Retry 3PL
+                            </Button>
+                            <Button
+                              variant="plain"
+                              onClick={() => sendTo3pl(plan.id, "ack_3pl")}
+                            >
+                              Ack 3PL
                             </Button>
                             <Button
                               variant="plain"
@@ -669,6 +685,13 @@ export default function SplitPlansPage() {
                           ))}
                           {getLatestInstructionSummary(plan) ? (
                             <List.Item>{getLatestInstructionSummary(plan)}</List.Item>
+                          ) : null}
+                          <List.Item>
+                            Delivery attempts: {plan.deliveryAttempts ?? 0}
+                            {plan.lastDeliveryAt ? ` • last at ${new Date(plan.lastDeliveryAt).toLocaleString()}` : ""}
+                          </List.Item>
+                          {plan.lastDeliveryError ? (
+                            <List.Item>Last delivery error: {plan.lastDeliveryError}</List.Item>
                           ) : null}
                           {plan.events?.[0]?.eventType ? (
                             <List.Item>Latest event: {plan.events[0].eventType}</List.Item>
